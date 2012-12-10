@@ -13,8 +13,8 @@
     padding: 0;
     border: 1px solid #000;
     float: left;
-    width: 15px;
-    height: 15px;
+    width: 10px;
+    height: 10px;
   }
 
   .alive {
@@ -30,162 +30,131 @@
     }
   };
   </script>
+  <script type="text/coffeescript">
+  require ['knockout', 'lodash'], (ko, _) ->
+    getParameterByName = (name) ->
+      name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]")
+      regexS = "[\\?&]" + name + "=([^&#]*)"
+      regex = new RegExp(regexS)
+      results = regex.exec(window.location.search)
+      if results? then decodeURIComponent results[1].replace(/\+/g, " ") else ""
+
+    splitparse = (on_, str) ->
+      _.map str.split(on_), (i) -> parseInt i, 10
+
+    construct = (rows, cols) ->
+      grid = []
+      r = rows + 2
+      c = cols + 2
+      i = 0
+
+      while i < r
+        row = []
+        j = 0
+
+        while j < c
+          visible = 0 < i and i < r - 1 and 0 < j and j < c - 1
+          row.push new Cell((c * i) + j, visible)
+          j += 1
+        grid.push row
+        i += 1
+      grid
+
+    toggle = (cell, neighbors) ->
+      # lonliness
+      return true if cell.alive() and neighbors < 2
+
+      # overcrowding
+      return true if cell.alive() and neighbors > 3
+
+      # birth
+      return true if not cell.alive() and neighbors is 3
+
+      false
+
+    run = (grid, magic) ->
+      toggles = []
+      hints = [-1 * (magic + 1), -1 * magic, -1 * (magic - 1), -1, 1, (magic - 1), magic, (magic + 1)]
+
+      _.chain(grid).rest(magic + 1).initial(magic + 1).each (cell, idx) ->
+        idx += magic + 1
+        collect = _.map hints, (i) -> grid[i + idx]
+        neighbors = _.reduce(collect, (num, neighbor) ->
+          num += if neighbor.alive() then 1 else 0
+        , 0)
+
+        toggles.push idx if toggle cell, neighbors
+
+      _.each toggles, (t) -> grid[t].toggle()
+
+    class Cell
+      constructor: (@idx, @visible) ->
+        @alive = ko.observable(false)
+
+      toggle: -> @alive not @alive()
+
+    class ConwayView
+      constructor: ->
+        @isRunning = ko.observable(false)
+        @interval = ko.observable(1000)
+
+        @cols = ko.observable(20).extend(numeric: 0)
+        @rows = ko.observable(10).extend(numeric: 0)
+        @cells = ko.observableArray(construct(@rows(), @cols()))
+
+        @cols.subscribe (val) => @cells construct(@rows(), val)
+        @rows.subscribe (val) => @cells construct(val, @cols())
+
+      run: ->
+        timer = =>
+          return unless @isRunning()
+          run _.flatten(@cells()), @cols() + 2
+          setTimeout timer, @interval()
+
+        @isRunning true
+        setTimeout timer, 0
+
+      stop: -> @isRunning false
+
+    ko.extenders.numeric = (target, precision) ->
+      #create a writeable computed observable to intercept writes to our observable
+      result = ko.computed(
+        read: target #always return the original observables value
+        write: (newValue) ->
+          current = target()
+          roundingMultiplier = Math.pow(10, precision)
+          newValueAsNum = (if isNaN(newValue) then 0 else parseFloat(+newValue))
+          valueToWrite = Math.round(newValueAsNum * roundingMultiplier) / roundingMultiplier
+          if valueToWrite isnt current
+            target valueToWrite
+          else
+            target.notifySubscribers valueToWrite  if newValue isnt current
+      )
+      result target()
+      result
+
+    init = (view) ->
+      cols = getParameterByName("c")
+      rows = getParameterByName("r")
+      interval = getParameterByName("i")
+      seed = getParameterByName("seed")
+
+      view.cols cols if cols
+      view.rows rows if rows
+      view.interval interval if interval
+
+      if seed
+        _.chain(seed.split(",")).map(_.partial(splitparse, ":")).each (xy) ->
+          view.cells()[xy[0] + 1][xy[1] + 1].toggle()
+
+      view
+
+    ko.applyBindings init new ConwayView
+
+    # fun /conways.html?i=500&c=100&r=100&seed=5:5,5:6,5:7,5:8,5:9,5:10,5:11,5:12,5:13,5:14,15:25,15:26,15:27,15:28,15:29,15:30,15:31,15:32,15:33,15:34
+  </script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/coffee-script/1.3.3/coffee-script.min.js"></script>
   <script src="http://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.1/require.js"></script>
-  <script>
-  require(['knockout', 'lodash'], function (ko, _) {
-    function getParameterByName(name) {
-      name = name.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
-      var regexS = "[\\?&]" + name + "=([^&#]*)";
-      var regex = new RegExp(regexS);
-      var results = regex.exec(window.location.search);
-      if(results == null)
-        return "";
-      else
-        return decodeURIComponent(results[1].replace(/\+/g, " "));
-    }
-
-    function splitparse(on, str) {
-      return _.map(str.split(on), function (i) { return parseInt(i, 10) });
-    }
-
-    function construct(rows, cols) {
-      var visible, row,
-        grid = [], r = rows + 2, c = cols + 2;
-
-      for (var i = 0; i < r; i += 1) {
-        row = [];
-        for (var j = 0; j < c; j += 1) {
-          visible = 0 < i && i < r - 1 && 0 < j && j < c - 1;
-          row.push(new Cell((c * i) + j, visible));
-        }
-
-        grid.push(row);
-      }
-
-      return grid;
-    }
-
-    function run(grid, magic) {
-      var toggles = [], cell, collect, neighbors,
-        hints = [-1 * (magic + 1), -1 * magic, -1 * (magic - 1), -1, 1, (magic - 1), magic, (magic + 1)];
-
-      _.chain(grid).rest(magic + 1).initial(magic + 1).each(function (cell, idx) {
-        idx += magic + 1;
-        collect = _.map(hints, function (i) { return grid[i + idx]; });
-        neighbors = _.reduce(collect, function (num, neighbor) { return num += neighbor.alive() ? 1 : 0; }, 0);
-
-        if (cell.alive() && (neighbors < 2 || 3 < neighbors)) {
-          toggles.push(idx);
-        } else if (!cell.alive() && 3 === neighbors) {
-          toggles.push(idx);
-        }
-      });
-
-      _.each(toggles, function (t) { grid[t].toggle(); });
-    }
-
-    var Cell = function (idx, visible) {
-      var self = this;
-
-      self.index = idx;
-      self.visible = visible;
-      self.alive = ko.observable(false);
-
-      self.toggle = function () {
-        self.alive(!self.alive());
-      };
-    };
-
-    var ConwayView = function () {
-      function timer() {
-        if (!self.isRunning()) {
-          return;
-        }
-
-        run(_.flatten(self.cells()), self.cols() + 2);
-        setTimeout(timer, self.interval());
-      }
-
-      var self = this;
-
-      self.isRunning = ko.observable(false);
-
-      self.interval = ko.observable(1000);
-      self.cols = ko.observable(20).extend({ numeric: 0 });
-      self.rows = ko.observable(10).extend({ numeric: 0 });
-
-      self.cells = ko.observableArray(construct(self.rows(), self.cols()));
-
-      self.run = function () {
-        self.isRunning(true);
-        setTimeout(timer, 0);
-      };
-
-      self.stop = function () {
-        self.isRunning(false);
-      };
-
-      self.cols.subscribe(function (val) {
-        self.cells(construct(self.rows(), val));
-      });
-
-      self.rows.subscribe(function (val) {
-        self.cells(construct(val, self.cols()));
-      });
-
-      var cols = getParameterByName('c'),
-        rows = getParameterByName('r'),
-        interval = getParameterByName('i'),
-        seed = getParameterByName('seed');
-
-      if (cols) {
-        self.cols(cols);
-      }
-
-      if (rows) {
-        self.rows(rows);
-      }
-
-      if (interval) {
-        self.interval(interval);
-      }
-
-      if (seed) {
-        _.chain(seed.split(','))
-          .map(_.partial(splitparse, ':'))
-          .each(function (xy) {
-            self.cells()[xy[0] + 1][xy[1] + 1].toggle();
-          });
-      }
-    };
-
-    ko.extenders.numeric = function(target, precision) {
-      //create a writeable computed observable to intercept writes to our observable
-      var result = ko.computed({
-        read: target,  //always return the original observables value
-        write: function(newValue) {
-          var current = target(),
-            roundingMultiplier = Math.pow(10, precision),
-            newValueAsNum = isNaN(newValue) ? 0 : parseFloat(+newValue),
-            valueToWrite = Math.round(newValueAsNum * roundingMultiplier) / roundingMultiplier;
-
-          if (valueToWrite !== current) {
-            target(valueToWrite);
-          } else {
-            if (newValue !== current) {
-              target.notifySubscribers(valueToWrite);
-            }
-          }
-        }
-      });
-
-      result(target());
-      return result;
-    };
-
-    ko.applyBindings(new ConwayView);
-  });
-</script>
 </head>
 
 <body>
