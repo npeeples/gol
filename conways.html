@@ -8,17 +8,21 @@
     display: table;
   }
 
+  .row {
+    white-space: nowrap;
+  }
+
   .cell {
     margin: 0;
     padding: 0;
-    border: 1px solid #000;
+    border: 1px solid #999;
     float: left;
     width: 10px;
     height: 10px;
   }
 
   .alive {
-    background-color: #333;
+    background-color: #111;
   }
   </style>
 
@@ -44,17 +48,14 @@
 
     construct = (rows, cols) ->
       grid = []
-      r = rows + 2
-      c = cols + 2
       i = 0
 
-      while i < r
+      while i < rows
         row = []
         j = 0
 
-        while j < c
-          visible = 0 < i and i < r - 1 and 0 < j and j < c - 1
-          row.push new Cell((c * i) + j, visible)
+        while j < cols
+          row.push new Cell((cols * i) + j)
           j += 1
         grid.push row
         i += 1
@@ -72,13 +73,22 @@
 
       false
 
-    run = (grid, magic) ->
+    run = (grid, width) ->
+      length = grid.length
       toggles = []
-      hints = [-1 * (magic + 1), -1 * magic, -1 * (magic - 1), -1, 1, (magic - 1), magic, (magic + 1)]
+      hints = [-1 * (width + 1), -1 * width, -1 * (width - 1), -1, 1, (width - 1), width, (width + 1)]
 
-      _.chain(grid).rest(magic + 1).initial(magic + 1).each (cell, idx) ->
-        idx += magic + 1
-        collect = _.map hints, (i) -> grid[i + idx]
+      _.chain(grid).each (cell, idx) ->
+        collect = _.map hints, (i) ->
+          n = idx + i
+
+          if n < 0
+            grid[length + n]
+          else if n >= length
+            grid[n - length]
+          else
+            grid[n]
+
         neighbors = _.reduce(collect, (num, neighbor) ->
           num += if neighbor.alive() then 1 else 0
         , 0)
@@ -88,10 +98,11 @@
       _.each toggles, (t) -> grid[t].toggle()
 
     class Cell
-      constructor: (@idx, @visible) ->
+      constructor: (@idx) ->
         @alive = ko.observable(false)
 
       toggle: -> @alive not @alive()
+      die: -> @alive false
 
     class ConwayView
       constructor: ->
@@ -102,19 +113,37 @@
         @rows = ko.observable(10).extend(numeric: 0)
         @cells = ko.observableArray(construct(@rows(), @cols()))
 
+        @seed = ko.observable()
+
         @cols.subscribe (val) => @cells construct(@rows(), val)
         @rows.subscribe (val) => @cells construct(val, @cols())
 
       run: ->
         timer = =>
           return unless @isRunning()
-          run _.flatten(@cells()), @cols() + 2
+          run _.flatten(@cells()), @cols()
           setTimeout timer, @interval()
 
         @isRunning true
         setTimeout timer, 0
 
       stop: -> @isRunning false
+
+      dump: ->
+        @seed "&seed="
+        _.each @cells(), (row, i) =>
+          _.each row, (cell, j) =>
+            if cell.alive()
+              rnum = i + 1
+              cnum = j + 1
+              @seed @seed() + "#{rnum}:#{cnum},"
+
+        @seed @seed().substr(0, @seed().length - 1)
+
+      reset: ->
+        @seed null
+        _.each @cells(), (row, rnum) =>
+          _.each row, (cell, cnum) => cell.die()
 
     ko.extenders.numeric = (target, precision) ->
       #create a writeable computed observable to intercept writes to our observable
@@ -144,14 +173,13 @@
       view.interval interval if interval
 
       if seed
+        view.seed "&seed=#{seed}"
         _.chain(seed.split(",")).map(_.partial(splitparse, ":")).each (xy) ->
-          view.cells()[xy[0] + 1][xy[1] + 1].toggle()
+          view.cells()[xy[0] - 1][xy[1] - 1].toggle()
 
       view
 
     ko.applyBindings init new ConwayView
-
-    # fun /conways.html?i=500&c=100&r=100&seed=5:5,5:6,5:7,5:8,5:9,5:10,5:11,5:12,5:13,5:14,15:25,15:26,15:27,15:28,15:29,15:30,15:31,15:32,15:33,15:34
   </script>
   <script src="http://cdnjs.cloudflare.com/ajax/libs/coffee-script/1.3.3/coffee-script.min.js"></script>
   <script src="http://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.1/require.js"></script>
@@ -168,13 +196,18 @@
     <input id="cols" type="text" data-bind="value: cols">
     <label for="interval">interval</label>
     <input id="interval" type="text" data-bind="value: interval">
+
+    <button data-bind="click: dump">Create Seed</button>
+    <button data-bind="click: reset">Reset</button>
   </form>
 
   <div id="board" data-bind="foreach: cells">
     <div class="row" data-bind="foreach: $data">
-      <span class="cell" data-bind="click: toggle, visible: visible, css: { alive: alive }"></span>
+      <span class="cell" data-bind="click: toggle, css: { alive: alive }"></span>
     </div>
   </div>
+
+  <pre data-bind="text: seed, visible: seed"></pre>
 </body>
 
 </html>
