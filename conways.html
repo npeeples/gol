@@ -1,0 +1,211 @@
+<html>
+
+<head>
+  <style>
+  #board {
+    margin: 0 auto;
+    border-collapse: collapse;
+    display: table;
+  }
+
+  .cell {
+    margin: 0;
+    padding: 0;
+    border: 1px solid #000;
+    float: left;
+    width: 15px;
+    height: 15px;
+  }
+
+  .alive {
+    background-color: #333;
+  }
+  </style>
+
+  <script>
+  var require = {
+    paths: {
+      lodash: 'http://cdnjs.cloudflare.com/ajax/libs/lodash.js/1.0.0-rc.2/lodash.min',
+      knockout: 'http://cdnjs.cloudflare.com/ajax/libs/knockout/2.2.0/knockout-min'
+    }
+  };
+  </script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.1/require.js"></script>
+  <script>
+  require(['knockout', 'lodash'], function (ko, _) {
+    function getParameterByName(name) {
+      name = name.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
+      var regexS = "[\\?&]" + name + "=([^&#]*)";
+      var regex = new RegExp(regexS);
+      var results = regex.exec(window.location.search);
+      if(results == null)
+        return "";
+      else
+        return decodeURIComponent(results[1].replace(/\+/g, " "));
+    }
+
+    function splitparse(on, str) {
+      return _.map(str.split(on), function (i) { return parseInt(i, 10) });
+    }
+
+    function construct(rows, cols) {
+      var visible, row,
+        grid = [], r = rows + 2, c = cols + 2;
+
+      for (var i = 0; i < r; i += 1) {
+        row = [];
+        for (var j = 0; j < c; j += 1) {
+          visible = 0 < i && i < r - 1 && 0 < j && j < c - 1;
+          row.push(new Cell((c * i) + j, visible));
+        }
+
+        grid.push(row);
+      }
+
+      return grid;
+    }
+
+    function run(grid, magic) {
+      var toggles = [], cell, collect, neighbors,
+        hints = [-1 * (magic + 1), -1 * magic, -1 * (magic - 1), -1, 1, (magic - 1), magic, (magic + 1)];
+
+      _.chain(grid).rest(magic + 1).initial(magic + 1).each(function (cell, idx) {
+        idx += magic + 1;
+        collect = _.map(hints, function (i) { return grid[i + idx]; });
+        neighbors = _.reduce(collect, function (num, neighbor) { return num += neighbor.alive() ? 1 : 0; }, 0);
+
+        if (cell.alive() && (neighbors < 2 || 3 < neighbors)) {
+          toggles.push(idx);
+        } else if (!cell.alive() && 3 === neighbors) {
+          toggles.push(idx);
+        }
+      });
+
+      _.each(toggles, function (t) { grid[t].toggle(); });
+    }
+
+    var Cell = function (idx, visible) {
+      var self = this;
+
+      self.index = idx;
+      self.visible = visible;
+      self.alive = ko.observable(false);
+
+      self.toggle = function () {
+        self.alive(!self.alive());
+      };
+    };
+
+    var ConwayView = function () {
+      function timer() {
+        if (!self.isRunning()) {
+          return;
+        }
+
+        run(_.flatten(self.cells()), self.cols() + 2);
+        setTimeout(timer, self.interval());
+      }
+
+      var self = this;
+
+      self.isRunning = ko.observable(false);
+
+      self.interval = ko.observable(1000);
+      self.cols = ko.observable(20).extend({ numeric: 0 });
+      self.rows = ko.observable(10).extend({ numeric: 0 });
+
+      self.cells = ko.observableArray(construct(self.rows(), self.cols()));
+
+      self.run = function () {
+        self.isRunning(true);
+        setTimeout(timer, 0);
+      };
+
+      self.stop = function () {
+        self.isRunning(false);
+      };
+
+      self.cols.subscribe(function (val) {
+        self.cells(construct(self.rows(), val));
+      });
+
+      self.rows.subscribe(function (val) {
+        self.cells(construct(val, self.cols()));
+      });
+
+      var cols = getParameterByName('c'),
+        rows = getParameterByName('r'),
+        interval = getParameterByName('i'),
+        seed = getParameterByName('seed');
+
+      if (cols) {
+        self.cols(cols);
+      }
+
+      if (rows) {
+        self.rows(rows);
+      }
+
+      if (interval) {
+        self.interval(interval);
+      }
+
+      if (seed) {
+        _.chain(seed.split(','))
+          .map(_.partial(splitparse, ':'))
+          .each(function (xy) {
+            self.cells()[xy[0] + 1][xy[1] + 1].toggle();
+          });
+      }
+    };
+
+    ko.extenders.numeric = function(target, precision) {
+      //create a writeable computed observable to intercept writes to our observable
+      var result = ko.computed({
+        read: target,  //always return the original observables value
+        write: function(newValue) {
+          var current = target(),
+            roundingMultiplier = Math.pow(10, precision),
+            newValueAsNum = isNaN(newValue) ? 0 : parseFloat(+newValue),
+            valueToWrite = Math.round(newValueAsNum * roundingMultiplier) / roundingMultiplier;
+
+          if (valueToWrite !== current) {
+            target(valueToWrite);
+          } else {
+            if (newValue !== current) {
+              target.notifySubscribers(valueToWrite);
+            }
+          }
+        }
+      });
+
+      result(target());
+      return result;
+    };
+
+    ko.applyBindings(new ConwayView);
+  });
+</script>
+</head>
+
+<body>
+  <form>
+    <button data-bind="click: run, disable: isRunning">Run</button>
+    <button data-bind="click: stop, enable: isRunning">Stop</button>
+
+    <label for="rows">rows</label>
+    <input id="rows" type="text" data-bind="value: rows">
+    <label for="cols">cols</label>
+    <input id="cols" type="text" data-bind="value: cols">
+    <label for="interval">interval</label>
+    <input id="interval" type="text" data-bind="value: interval">
+  </form>
+
+  <div id="board" data-bind="foreach: cells">
+    <div class="row" data-bind="foreach: $data">
+      <span class="cell" data-bind="click: toggle, visible: visible, css: { alive: alive }"></span>
+    </div>
+  </div>
+</body>
+
+</html>
